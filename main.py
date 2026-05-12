@@ -60,7 +60,7 @@ def infer_cell_value(sample_value=None):
     return lambda: faker.sentence(nb_words=random.randint(2, 5))
 
 
-def generate_synthetic_excel(path='synthetic_invoice.xlsx', template_path='test_invoice.xlsx', total_rows=80):
+def generate_synthetic_excel(path='synthetic_invoice.xlsx', template_path='test_invoice.xlsx', total_rows=80, replace_table=False):
     source_data = read_excel_to_data(template_path)
     bbox = detect_table_bbox(source_data)
     if bbox is None:
@@ -80,13 +80,41 @@ def generate_synthetic_excel(path='synthetic_invoice.xlsx', template_path='test_
 
     generators = [infer_cell_value(sample) for sample in sample_row]
 
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.title = 'SyntheticInvoice'
+    if replace_table:
+        data_rows = end_row - start_row
+    else:
+        data_rows = total_rows - 1
 
-    sheet.append(headers)
-    for _ in range(total_rows - 1):
-        sheet.append([gen() for gen in generators])
+    if replace_table:
+        new_data = []
+        for i, row in enumerate(source_data):
+            if i < start_row:
+                new_data.append(list(row))
+            elif i == start_row:
+                # Replace the header row, but keep columns outside the table
+                new_row = list(row)
+                for col in range(start_col, end_col + 1):
+                    new_row[col] = headers[col - start_col]
+                new_data.append(new_row)
+            elif i <= end_row:
+                # Replace the data rows
+                new_row = [None] * len(row)
+                for col in range(start_col, end_col + 1):
+                    new_row[col] = generators[col - start_col]()
+                new_data.append(new_row)
+            else:
+                new_data.append(list(row))
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        for row in new_data:
+            sheet.append(row)
+    else:
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = 'SyntheticInvoice'
+        sheet.append(headers)
+        for _ in range(data_rows):
+            sheet.append([gen() for gen in generators])
 
     workbook.save(path)
     return path
@@ -149,13 +177,19 @@ def detect_table_bbox(data, min_row_density=0.3):
 
 
 if __name__ == '__main__':
-    output_path = generate_synthetic_excel('synthetic_invoice_dynamic.xlsx', total_rows=80)
-    print(f'Generated Excel file: {output_path} at {datetime.now():%Y-%m-%d %H:%M:%S}')
+    # Generate only the table
+    output_path_table = generate_synthetic_excel('synthetic_invoice_table_only.xlsx', template_path='test_invoice.xlsx', total_rows=80, replace_table=False)
+    print(f'Generated table-only Excel file: {output_path_table} at {datetime.now():%Y-%m-%d %H:%M:%S}')
 
-    data = read_excel_to_data(output_path)
-    print('First 10 rows:')
+    # Generate full file with replaced table
+    output_path_full = generate_synthetic_excel('synthetic_invoice_full.xlsx', template_path='test_invoice.xlsx', replace_table=True)
+    print(f'Generated full Excel file with replaced table: {output_path_full} at {datetime.now():%Y-%m-%d %H:%M:%S}')
+
+    # Test detection on the full file
+    data = read_excel_to_data(output_path_full)
+    print('First 10 rows of full file:')
     for row in data[:10]:
         print(row)
 
     bbox = detect_table_bbox(data)
-    print('Detected bbox:', bbox)
+    print('Detected bbox in full file:', bbox)
